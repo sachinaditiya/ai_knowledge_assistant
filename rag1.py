@@ -81,31 +81,47 @@ if uploaded_files:
     st.success(f"{len(uploaded_files)} PDF(s) processed successfully!")
 
 # =============================
-# Voice Input Controls
+# Voice Input Controls (Optional)
 # =============================
-st.subheader("🎙️ Voice Input")
-recognizer = sr.Recognizer()
-mic = sr.Microphone()
-col1, col2 = st.columns(2)
+st.subheader("🎙️ Voice Input (Optional)")
+uploaded_audio = st.file_uploader("Upload audio file (optional)", type=["wav", "mp3"])
 
-with col1:
-    if st.button("▶️ Start Recording"):
-        st.info("Listening... please speak clearly.")
-        with mic as source:
-            recognizer.adjust_for_ambient_noise(source)
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+query_text = ""
+
+if uploaded_audio:
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(uploaded_audio) as source:
+        audio_data = recognizer.record(source)
         try:
-            query_text = recognizer.recognize_google(audio)
+            query_text = recognizer.recognize_google(audio_data)
             st.session_state.user_question = query_text
-            st.success(f"🗣️ Recognized: {query_text}")
+            st.success(f"🗣️ Recognized from uploaded audio: {query_text}")
         except sr.UnknownValueError:
-            st.error("Sorry, I couldn't understand your voice.")
+            st.error("Could not understand the uploaded audio.")
         except sr.RequestError:
-            st.error("Speech recognition service error.")
-
-with col2:
-    if st.button("🛑 Stop Recording"):
-        st.info("Recording stopped.")
+            st.error("Error with speech recognition service.")
+else:
+    try:
+        # Only try microphone if running locally
+        import os
+        if os.environ.get("STREAMLIT_SERVER") is None:
+            recognizer = sr.Recognizer()
+            mic = sr.Microphone()
+            if st.button("▶️ Start Recording (Local Only)"):
+                st.info("Listening... please speak clearly.")
+                with mic as source:
+                    recognizer.adjust_for_ambient_noise(source)
+                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+                try:
+                    query_text = recognizer.recognize_google(audio)
+                    st.session_state.user_question = query_text
+                    st.success(f"🗣️ Recognized: {query_text}")
+                except sr.UnknownValueError:
+                    st.error("Sorry, I couldn't understand your voice.")
+                except sr.RequestError:
+                    st.error("Speech recognition service error.")
+    except Exception:
+        st.info("Microphone input not available on this platform.")
 
 # =============================
 # Question Input
@@ -121,7 +137,7 @@ user_question = st.text_input(
 # Function to clean text for embeddings
 # =============================
 def clean_for_embedding(text):
-    emoji_pattern = re.compile("["
+    emoji_pattern = re.compile("[" 
         u"\U0001F600-\U0001F64F"
         u"\U0001F300-\U0001F5FF"
         u"\U0001F680-\U0001F6FF"
