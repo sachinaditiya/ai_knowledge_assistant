@@ -14,7 +14,7 @@ import re
 # Streamlit App Title
 # =============================
 st.set_page_config(page_title="🧠 Agentic AI Assistant", layout="wide")
-st.title("🧠 Agentic AI Assistant — Multi-PDF + Voice Input + Custom Output")
+st.title("🧠 Agentic AI Assistant — Multi-PDF + Optional Voice Input + Custom Output")
 
 # =============================
 # OpenAI API Key Input
@@ -81,47 +81,21 @@ if uploaded_files:
     st.success(f"{len(uploaded_files)} PDF(s) processed successfully!")
 
 # =============================
-# Voice Input Controls (Optional)
+# Optional Voice Input Section
 # =============================
-st.subheader("🎙️ Voice Input (Optional)")
-uploaded_audio = st.file_uploader("Upload audio file (optional)", type=["wav", "mp3"])
-
-query_text = ""
-
-if uploaded_audio:
+st.subheader("🎤 Optional Voice Input (Upload .wav/.mp3)")
+voice_file = st.file_uploader("Upload your voice file:", type=["wav", "mp3"])
+if voice_file:
     recognizer = sr.Recognizer()
-    with sr.AudioFile(uploaded_audio) as source:
+    audio = sr.AudioFile(voice_file)
+    with audio as source:
         audio_data = recognizer.record(source)
-        try:
-            query_text = recognizer.recognize_google(audio_data)
-            st.session_state.user_question = query_text
-            st.success(f"🗣️ Recognized from uploaded audio: {query_text}")
-        except sr.UnknownValueError:
-            st.error("Could not understand the uploaded audio.")
-        except sr.RequestError:
-            st.error("Error with speech recognition service.")
-else:
     try:
-        # Only try microphone if running locally
-        import os
-        if os.environ.get("STREAMLIT_SERVER") is None:
-            recognizer = sr.Recognizer()
-            mic = sr.Microphone()
-            if st.button("▶️ Start Recording (Local Only)"):
-                st.info("Listening... please speak clearly.")
-                with mic as source:
-                    recognizer.adjust_for_ambient_noise(source)
-                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                try:
-                    query_text = recognizer.recognize_google(audio)
-                    st.session_state.user_question = query_text
-                    st.success(f"🗣️ Recognized: {query_text}")
-                except sr.UnknownValueError:
-                    st.error("Sorry, I couldn't understand your voice.")
-                except sr.RequestError:
-                    st.error("Speech recognition service error.")
-    except Exception:
-        st.info("Microphone input not available on this platform.")
+        query_text = recognizer.recognize_google(audio_data)
+        st.session_state.user_question = query_text
+        st.success(f"🗣️ Recognized from file: {query_text}")
+    except Exception as e:
+        st.error(f"Could not process audio: {e}")
 
 # =============================
 # Question Input
@@ -167,41 +141,47 @@ def text_to_speech(text, lang='en'):
 # Get Answer Button
 # =============================
 if st.button("✨ Get Answer"):
-    if not pdf_text:
+    if not pdf_text.strip():
         st.warning("Please upload at least one PDF first!")
     elif not user_question.strip():
-        st.warning("Please enter or speak a question first!")
+        st.warning("Please enter a question first!")
     else:
         with st.spinner("Thinking..."):
-            # Split text into chunks
+            # Split PDF text into chunks
             text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = text_splitter.split_text(pdf_text)
-            cleaned_chunks = [clean_for_embedding(chunk) for chunk in chunks]
+            cleaned_chunks = [clean_for_embedding(chunk) for chunk in chunks if chunk.strip()]
 
-            # Create embeddings and FAISS vector store
-            embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
-            vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
+            if not cleaned_chunks:
+                st.error("No valid text found in the uploaded PDF(s).")
+            else:
+                try:
+                    # Initialize embeddings and vectorstore
+                    embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
+                    vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
 
-            # Retrieve relevant chunks
-            docs = vectorstore.similarity_search(user_question, k=3)
-            context = "\n".join([doc.page_content for doc in docs])
+                    # Retrieve relevant chunks
+                    docs = vectorstore.similarity_search(user_question, k=3)
+                    context = "\n".join([doc.page_content for doc in docs])
 
-            # Get answer from OpenAI LLM
-            llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
-            answer = llm(
-                f"Answer the question using ONLY the following context:\n{context}\n"
-                f"Question: {user_question}\nAnswer:"
-            )
+                    # Get answer from OpenAI LLM
+                    llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
+                    answer = llm(
+                        f"Answer the question using ONLY the following context:\n{context}\n"
+                        f"Question: {user_question}\nAnswer:"
+                    )
 
-            # Store in chat history with output type
-            st.session_state.chat_history.append({
-                "user": user_question,
-                "bot": answer,
-                "output_type": st.session_state.output_type
-            })
+                    # Store in chat history
+                    st.session_state.chat_history.append({
+                        "user": user_question,
+                        "bot": answer,
+                        "output_type": st.session_state.output_type
+                    })
+                except Exception as e:
+                    st.error(f"Error while generating embeddings or answer: {e}")
 
 # =============================
-# Display chat history based on output type
+# Display chat history
 # =============================
 st.subheader("💬 Chat History")
 for chat in st.session_state.chat_history[::-1]:
@@ -214,7 +194,7 @@ for chat in st.session_state.chat_history[::-1]:
     st.markdown("---")
 
 # =============================
-# Centered Footer with LinkedIn link
+# Centered Footer
 # =============================
 st.markdown(
     """
