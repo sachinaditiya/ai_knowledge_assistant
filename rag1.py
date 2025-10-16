@@ -8,13 +8,17 @@ from langchain.llms import OpenAI
 import speech_recognition as sr
 from gtts import gTTS
 from io import BytesIO
+from pydub import AudioSegment
+import tempfile
+import os
 import re
+import platform
 
 # =============================
 # Streamlit App Title
 # =============================
 st.set_page_config(page_title="🧠 Agentic AI Assistant", layout="wide")
-st.title("🧠 Agentic AI Assistant — Multi-PDF + Optional Voice Input + Custom Output")
+st.title("🧠 Agentic AI Assistant — Multi-PDF + Voice Input + Custom Output")
 
 # =============================
 # OpenAI API Key Input
@@ -39,18 +43,13 @@ st.session_state.output_type = output_type
 # Voice Accent / Language Input (optional)
 # =============================
 st.sidebar.header("🎤 Voice Accent / Language (Optional)")
-accent = st.sidebar.selectbox("Choose a voice accent (optional):", ["Default (en)", "US", "UK", "India"])
+accent = st.sidebar.selectbox("Choose a voice accent:", ["Default (en)", "US", "UK", "India"])
 custom_lang = st.sidebar.text_input("Or type a language code (e.g., en, hi, fr):", "")
 
 def get_lang_code(accent, custom_lang):
     if custom_lang.strip():
         return custom_lang.strip()
-    mapping = {
-        "Default (en)": "en",
-        "US": "en",
-        "UK": "en",
-        "India": "en"
-    }
+    mapping = {"Default (en)": "en", "US": "en", "UK": "en", "India": "en"}
     return mapping.get(accent, "en")
 
 voice_lang = get_lang_code(accent, custom_lang)
@@ -83,19 +82,57 @@ if uploaded_files:
 # =============================
 # Optional Voice Input Section
 # =============================
-st.subheader("🎤 Optional Voice Input (Upload .wav/.mp3)")
-voice_file = st.file_uploader("Upload your voice file:", type=["wav", "mp3"])
-if voice_file:
-    recognizer = sr.Recognizer()
-    audio = sr.AudioFile(voice_file)
-    with audio as source:
-        audio_data = recognizer.record(source)
-    try:
-        query_text = recognizer.recognize_google(audio_data)
-        st.session_state.user_question = query_text
-        st.success(f"🗣️ Recognized from file: {query_text}")
-    except Exception as e:
-        st.error(f"Could not process audio: {e}")
+st.subheader("🎤 Optional Voice Input")
+
+def convert_audio_to_wav(file):
+    """Converts any uploaded audio file to WAV format."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+        try:
+            sound = AudioSegment.from_file(file)
+            sound.export(tmpfile.name, format="wav")
+            return tmpfile.name
+        except Exception as e:
+            st.error(f"Audio conversion failed: {e}")
+            return None
+
+recognizer = sr.Recognizer()
+
+# Detect if running locally
+is_local = platform.system() in ["Windows", "Darwin", "Linux"]
+
+if is_local:
+    st.info("🎙️ Local mode: Click below to record your voice (requires microphone).")
+    if st.button("Record Voice"):
+        with st.spinner("Listening..."):
+            try:
+                with sr.Microphone() as source:
+                    st.info("Speak now...")
+                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+                st.success("Recording complete!")
+                st.audio(audio.get_wav_data(), format="audio/wav")
+
+                try:
+                    query_text = recognizer.recognize_google(audio)
+                    st.session_state.user_question = query_text
+                    st.success(f"🗣️ Recognized: {query_text}")
+                except Exception as e:
+                    st.error(f"Speech recognition error: {e}")
+            except Exception as e:
+                st.error(f"Microphone access failed: {e}")
+else:
+    st.info("☁️ Cloud mode: Upload an audio file instead (mp3/wav/m4a).")
+    voice_file = st.file_uploader("Upload your voice file:", type=["wav", "mp3", "m4a"])
+    if voice_file:
+        wav_file = convert_audio_to_wav(voice_file)
+        if wav_file:
+            with sr.AudioFile(wav_file) as source:
+                audio_data = recognizer.record(source)
+            try:
+                query_text = recognizer.recognize_google(audio_data)
+                st.session_state.user_question = query_text
+                st.success(f"🗣️ Recognized from file: {query_text}")
+            except Exception as e:
+                st.error(f"Could not process audio: {e}")
 
 # =============================
 # Question Input
@@ -108,10 +145,10 @@ user_question = st.text_input(
 )
 
 # =============================
-# Function to clean text for embeddings
+# Function to clean text
 # =============================
 def clean_for_embedding(text):
-    emoji_pattern = re.compile("[" 
+    emoji_pattern = re.compile("["
         u"\U0001F600-\U0001F64F"
         u"\U0001F300-\U0001F5FF"
         u"\U0001F680-\U0001F6FF"
@@ -128,7 +165,7 @@ def clean_for_embedding(text):
     return text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
 
 # =============================
-# Function to convert text to speech
+# Text to Speech
 # =============================
 def text_to_speech(text, lang='en'):
     tts = gTTS(text=text, lang=lang)
@@ -144,10 +181,10 @@ if st.button("✨ Get Answer"):
     if not pdf_text.strip():
         st.warning("Please upload at least one PDF first!")
     elif not user_question.strip():
-        st.warning("Please enter a question first!")
+        st.warning("Please enter or record a question first!")
     else:
         with st.spinner("Thinking..."):
-            # Split PDF text into chunks
+            # Split text
             text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = text_splitter.split_text(pdf_text)
             cleaned_chunks = [clean_for_embedding(chunk) for chunk in chunks if chunk.strip()]
@@ -156,22 +193,18 @@ if st.button("✨ Get Answer"):
                 st.error("No valid text found in the uploaded PDF(s).")
             else:
                 try:
-                    # Initialize embeddings and vectorstore
                     embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
                     vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
 
-                    # Retrieve relevant chunks
                     docs = vectorstore.similarity_search(user_question, k=3)
                     context = "\n".join([doc.page_content for doc in docs])
 
-                    # Get answer from OpenAI LLM
                     llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
                     answer = llm(
                         f"Answer the question using ONLY the following context:\n{context}\n"
                         f"Question: {user_question}\nAnswer:"
                     )
 
-                    # Store in chat history
                     st.session_state.chat_history.append({
                         "user": user_question,
                         "bot": answer,
@@ -181,7 +214,7 @@ if st.button("✨ Get Answer"):
                     st.error(f"Error while generating embeddings or answer: {e}")
 
 # =============================
-# Display chat history
+# Display Chat History
 # =============================
 st.subheader("💬 Chat History")
 for chat in st.session_state.chat_history[::-1]:
@@ -194,13 +227,13 @@ for chat in st.session_state.chat_history[::-1]:
     st.markdown("---")
 
 # =============================
-# Centered Footer
+# Footer
 # =============================
 st.markdown(
     """
     <div style="text-align: center; margin-top: 50px; font-size: 14px; color: gray;">
-        Made with ❤️ by Sachin Aditiya | 
-        <a href='https://www.linkedin.com/in/sachin-aditiya-b-7691b314b/' target='_blank'>Connect with me on LinkedIn</a>
+        Made with ❤️ by Sachin Aditiya |
+        <a href='https://www.linkedin.com/in/sachin-aditiya-b-7691b314b/' target='_blank'>Connect on LinkedIn</a>
     </div>
     """,
     unsafe_allow_html=True
