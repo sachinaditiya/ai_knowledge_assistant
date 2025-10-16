@@ -36,10 +36,10 @@ output_type = st.sidebar.radio("Choose output type:", ["Text Only", "Audio Only"
 st.session_state.output_type = output_type
 
 # =============================
-# Voice Accent / Language Input
+# Voice Accent / Language Input (optional)
 # =============================
 st.sidebar.header("🎤 Voice Accent / Language (Optional)")
-accent = st.sidebar.selectbox("Choose a voice accent:", ["Default (en)", "US", "UK", "India"])
+accent = st.sidebar.selectbox("Choose a voice accent (optional):", ["Default (en)", "US", "UK", "India"])
 custom_lang = st.sidebar.text_input("Or type a language code (e.g., en, hi, fr):", "")
 
 def get_lang_code(accent, custom_lang):
@@ -83,37 +83,31 @@ if uploaded_files:
 # =============================
 # Voice Input Controls
 # =============================
-st.subheader("🎙️ Voice Input (Optional)")
-st.caption("🎧 Note: Voice recording works only in local environments. May not work on Streamlit Cloud.")
+st.subheader("🎙️ Voice Input(Optional)")
+st.caption("🎧 Note: Voice recording works only in local environments with a microphone. It may not work on Streamlit Cloud.")
 
-# Wrap microphone initialization in try-except to avoid crashing in Streamlit Cloud
-mic_available = True
-try:
-    recognizer = sr.Recognizer()
-    mic = sr.Microphone()
-except Exception:
-    mic_available = False
-    st.info("Voice recording not available in this environment.")
+recognizer = sr.Recognizer()
+mic = sr.Microphone()
+col1, col2 = st.columns(2)
 
-if mic_available:
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("▶️ Start Recording"):
-            st.info("Listening... please speak clearly.")
-            with mic as source:
-                recognizer.adjust_for_ambient_noise(source)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-            try:
-                query_text = recognizer.recognize_google(audio)
-                st.session_state.user_question = query_text
-                st.success(f"🗣️ Recognized: {query_text}")
-            except sr.UnknownValueError:
-                st.error("Sorry, I couldn't understand your voice.")
-            except sr.RequestError:
-                st.error("Speech recognition service error.")
-    with col2:
-        if st.button("🛑 Stop Recording"):
-            st.info("Recording stopped.")
+with col1:
+    if st.button("▶️ Start Recording"):
+        st.info("Listening... please speak clearly.")
+        with mic as source:
+            recognizer.adjust_for_ambient_noise(source)
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+        try:
+            query_text = recognizer.recognize_google(audio)
+            st.session_state.user_question = query_text
+            st.success(f"🗣️ Recognized: {query_text}")
+        except sr.UnknownValueError:
+            st.error("Sorry, I couldn't understand your voice.")
+        except sr.RequestError:
+            st.error("Speech recognition service error.")
+
+with col2:
+    if st.button("🛑 Stop Recording"):
+        st.info("Recording stopped.")
 
 # =============================
 # Question Input
@@ -169,26 +163,18 @@ if st.button("✨ Get Answer"):
             chunks = text_splitter.split_text(pdf_text)
             cleaned_chunks = [clean_for_embedding(chunk) for chunk in chunks]
 
-            try:
-                # Attempt FAISS + embeddings
-                embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
-                vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
-                docs = vectorstore.similarity_search(user_question, k=3)
-                context = "\n".join([doc.page_content for doc in docs])
+            embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
+            vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
 
-                llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
-                answer = llm(
-                    f"Answer the question using ONLY the following context:\n{context}\n"
-                    f"Question: {user_question}\nAnswer:"
-                )
+            docs = vectorstore.similarity_search(user_question, k=3)
+            context = "\n".join([doc.page_content for doc in docs])
 
-            except Exception as e:
-                # Fallback: LLM answer without FAISS context
-                st.warning("Could not use FAISS/embeddings. Falling back to direct LLM response.")
-                llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
-                answer = llm(f"Answer this question:\n{user_question}")
+            llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
+            answer = llm(
+                f"Answer the question using ONLY the following context:\n{context}\n"
+                f"Question: {user_question}\nAnswer:"
+            )
 
-            # Save to chat history
             st.session_state.chat_history.append({
                 "user": user_question,
                 "bot": answer,
