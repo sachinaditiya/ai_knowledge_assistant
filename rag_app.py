@@ -9,6 +9,7 @@ import speech_recognition as sr
 from gtts import gTTS
 from io import BytesIO
 import re
+import sys
 
 # =============================
 # Streamlit App Title
@@ -83,27 +84,39 @@ if uploaded_files:
 # =============================
 # Voice Input Controls
 # =============================
-st.subheader("🎙️ Voice Input(Optional)")
+st.subheader("🎙️ Voice Input (Optional)")
 st.caption("🎧 Note: Voice recording works only in local environments with a microphone. It may not work on Streamlit Cloud.")
 
 recognizer = sr.Recognizer()
-mic = sr.Microphone()
+mic_available = False
+
+# Try to initialize microphone; skip if PyAudio not installed
+try:
+    mic = sr.Microphone()
+    mic_available = True
+except Exception:
+    mic = None
+    mic_available = False
+
 col1, col2 = st.columns(2)
 
 with col1:
     if st.button("▶️ Start Recording"):
-        st.info("Listening... please speak clearly.")
-        with mic as source:
-            recognizer.adjust_for_ambient_noise(source)
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-        try:
-            query_text = recognizer.recognize_google(audio)
-            st.session_state.user_question = query_text
-            st.success(f"🗣️ Recognized: {query_text}")
-        except sr.UnknownValueError:
-            st.error("Sorry, I couldn't understand your voice.")
-        except sr.RequestError:
-            st.error("Speech recognition service error.")
+        if not mic_available:
+            st.warning("Voice recording not available in this environment. Run locally to use microphone.")
+        else:
+            st.info("Listening... please speak clearly.")
+            with mic as source:
+                recognizer.adjust_for_ambient_noise(source)
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+            try:
+                query_text = recognizer.recognize_google(audio)
+                st.session_state.user_question = query_text
+                st.success(f"🗣️ Recognized: {query_text}")
+            except sr.UnknownValueError:
+                st.error("Sorry, I couldn't understand your voice.")
+            except sr.RequestError:
+                st.error("Speech recognition service error.")
 
 with col2:
     if st.button("🛑 Stop Recording"):
@@ -199,10 +212,10 @@ for chat in st.session_state.chat_history[::-1]:
 # =============================
 st.markdown(
     """
-    <div style="text-align: center; margin-top: 50px; font-size: 14px; color: gray;">
+    <footer style="text-align:center; margin-top:40px; font-size:14px; color:gray;">
         Made with ❤️ by Sachin Aditiya | 
-        <a href='https://www.linkedin.com/in/sachin-aditiya-b-7691b314b/' target='_blank'>Connect with me on LinkedIn</a>
-    </div>
+        <a href='https://www.linkedin.com/in/sachin-aditiya-b-7691b314b/' target='_blank'>Connect on LinkedIn</a>
+    </footer>
     """,
     unsafe_allow_html=True
 )
