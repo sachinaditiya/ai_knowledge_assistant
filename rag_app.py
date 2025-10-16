@@ -83,7 +83,9 @@ if uploaded_files:
 # =============================
 # Voice Input Controls
 # =============================
-st.subheader("🎙️ Voice Input")
+st.subheader("🎙️ Voice Input(Optional)")
+st.caption("🎧 Note: Voice recording works only in local environments with a microphone. It may not work on Streamlit Cloud.")
+
 recognizer = sr.Recognizer()
 mic = sr.Microphone()
 col1, col2 = st.columns(2)
@@ -121,18 +123,18 @@ user_question = st.text_input(
 # Function to clean text for embeddings
 # =============================
 def clean_for_embedding(text):
-    emoji_pattern = re.compile("["
-        u"\U0001F600-\U0001F64F"
-        u"\U0001F300-\U0001F5FF"
-        u"\U0001F680-\U0001F6FF"
-        u"\U0001F700-\U0001F77F"
-        u"\U0001F780-\U0001F7FF"
-        u"\U0001F800-\U0001F8FF"
-        u"\U0001F900-\U0001F9FF"
-        u"\U0001FA00-\U0001FA6F"
-        u"\U0001FA70-\U0001FAFF"
-        u"\U00002700-\U000027BF"
-        u"\U000024C2-\U0001F251"
+    emoji_pattern = re.compile("[" 
+        u"\U0001F600-\U0001F64F"  
+        u"\U0001F300-\U0001F5FF"  
+        u"\U0001F680-\U0001F6FF"  
+        u"\U0001F700-\U0001F77F"  
+        u"\U0001F780-\U0001F7FF"  
+        u"\U0001F800-\U0001F8FF"  
+        u"\U0001F900-\U0001F9FF"  
+        u"\U0001FA00-\U0001FA6F"  
+        u"\U0001FA70-\U0001FAFF"  
+        u"\U00002700-\U000027BF"  
+        u"\U000024C2-\U0001F251"  
         "]+", flags=re.UNICODE)
     text = emoji_pattern.sub(r'', text)
     return text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
@@ -157,27 +159,22 @@ if st.button("✨ Get Answer"):
         st.warning("Please enter or speak a question first!")
     else:
         with st.spinner("Thinking..."):
-            # Split text into chunks
             text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = text_splitter.split_text(pdf_text)
             cleaned_chunks = [clean_for_embedding(chunk) for chunk in chunks]
 
-            # Create embeddings and FAISS vector store
             embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
             vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
 
-            # Retrieve relevant chunks
             docs = vectorstore.similarity_search(user_question, k=3)
             context = "\n".join([doc.page_content for doc in docs])
 
-            # Get answer from OpenAI LLM
             llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
             answer = llm(
                 f"Answer the question using ONLY the following context:\n{context}\n"
                 f"Question: {user_question}\nAnswer:"
             )
 
-            # Store in chat history with output type
             st.session_state.chat_history.append({
                 "user": user_question,
                 "bot": answer,
@@ -185,7 +182,7 @@ if st.button("✨ Get Answer"):
             })
 
 # =============================
-# Display chat history based on output type
+# Display chat history
 # =============================
 st.subheader("💬 Chat History")
 for chat in st.session_state.chat_history[::-1]:
@@ -198,7 +195,7 @@ for chat in st.session_state.chat_history[::-1]:
     st.markdown("---")
 
 # =============================
-# Centered Footer with LinkedIn link
+# Footer
 # =============================
 st.markdown(
     """
