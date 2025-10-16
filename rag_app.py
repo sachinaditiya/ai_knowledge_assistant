@@ -2,19 +2,13 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
-try:
-    from langchain.vectorstores import FAISS
-    from langchain.embeddings import OpenAIEmbeddings
-    from langchain.llms import OpenAI
-    embeddings_available = True
-except ImportError:
-    embeddings_available = False
-
+from langchain.vectorstores import FAISS
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.llms import OpenAI
 import speech_recognition as sr
 from gtts import gTTS
 from io import BytesIO
 import re
-import sys
 
 # =============================
 # Streamlit App Title
@@ -42,10 +36,10 @@ output_type = st.sidebar.radio("Choose output type:", ["Text Only", "Audio Only"
 st.session_state.output_type = output_type
 
 # =============================
-# Voice Accent / Language Input (optional)
+# Voice Accent / Language Input
 # =============================
 st.sidebar.header("🎤 Voice Accent / Language (Optional)")
-accent = st.sidebar.selectbox("Choose a voice accent (optional):", ["Default (en)", "US", "UK", "India"])
+accent = st.sidebar.selectbox("Choose a voice accent:", ["Default (en)", "US", "UK", "India"])
 custom_lang = st.sidebar.text_input("Or type a language code (e.g., en, hi, fr):", "")
 
 def get_lang_code(accent, custom_lang):
@@ -90,25 +84,26 @@ if uploaded_files:
 # Voice Input Controls
 # =============================
 st.subheader("🎙️ Voice Input (Optional)")
-st.caption("🎧 Note: Voice recording works only locally. It may not work on Streamlit Cloud.")
+st.caption("🎧 Note: Voice recording works only in local environments. May not work on Streamlit Cloud.")
 
+# Wrap microphone initialization in try-except to avoid crashing in Streamlit Cloud
+mic_available = True
 try:
     recognizer = sr.Recognizer()
     mic = sr.Microphone()
-    local_voice_enabled = True
 except Exception:
-    local_voice_enabled = False
-    st.info("⚠️ Voice recording is disabled in this environment.")
+    mic_available = False
+    st.info("Voice recording not available in this environment.")
 
-if local_voice_enabled:
+if mic_available:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("▶️ Start Recording"):
             st.info("Listening... please speak clearly.")
+            with mic as source:
+                recognizer.adjust_for_ambient_noise(source)
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
             try:
-                with mic as source:
-                    recognizer.adjust_for_ambient_noise(source)
-                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
                 query_text = recognizer.recognize_google(audio)
                 st.session_state.user_question = query_text
                 st.success(f"🗣️ Recognized: {query_text}")
@@ -168,34 +163,32 @@ if st.button("✨ Get Answer"):
         st.warning("Please upload at least one PDF first!")
     elif not user_question.strip():
         st.warning("Please enter or speak a question first!")
-    elif not embeddings_available:
-        st.error(
-            "⚠️ Embeddings or FAISS not available in this environment. "
-            "Try running the app locally with all dependencies installed."
-        )
     else:
         with st.spinner("Thinking..."):
-            # Split text into chunks
             text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = text_splitter.split_text(pdf_text)
             cleaned_chunks = [clean_for_embedding(chunk) for chunk in chunks]
 
-            # Create embeddings and FAISS vector store
-            embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
-            vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
+            try:
+                # Attempt FAISS + embeddings
+                embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
+                vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
+                docs = vectorstore.similarity_search(user_question, k=3)
+                context = "\n".join([doc.page_content for doc in docs])
 
-            # Retrieve relevant chunks
-            docs = vectorstore.similarity_search(user_question, k=3)
-            context = "\n".join([doc.page_content for doc in docs])
+                llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
+                answer = llm(
+                    f"Answer the question using ONLY the following context:\n{context}\n"
+                    f"Question: {user_question}\nAnswer:"
+                )
 
-            # Get answer from OpenAI LLM
-            llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
-            answer = llm(
-                f"Answer the question using ONLY the following context:\n{context}\n"
-                f"Question: {user_question}\nAnswer:"
-            )
+            except Exception as e:
+                # Fallback: LLM answer without FAISS context
+                st.warning("Could not use FAISS/embeddings. Falling back to direct LLM response.")
+                llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
+                answer = llm(f"Answer this question:\n{user_question}")
 
-            # Store in chat history with output type
+            # Save to chat history
             st.session_state.chat_history.append({
                 "user": user_question,
                 "bot": answer,
