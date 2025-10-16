@@ -2,9 +2,14 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.llms import OpenAI
+try:
+    from langchain.vectorstores import FAISS
+    from langchain.embeddings import OpenAIEmbeddings
+    from langchain.llms import OpenAI
+    embeddings_available = True
+except ImportError:
+    embeddings_available = False
+
 import speech_recognition as sr
 from gtts import gTTS
 from io import BytesIO
@@ -85,31 +90,25 @@ if uploaded_files:
 # Voice Input Controls
 # =============================
 st.subheader("🎙️ Voice Input (Optional)")
-st.caption("🎧 Note: Voice recording works only in local environments with a microphone. It may not work on Streamlit Cloud.")
+st.caption("🎧 Note: Voice recording works only locally. It may not work on Streamlit Cloud.")
 
-recognizer = sr.Recognizer()
-mic_available = False
-
-# Try to initialize microphone; skip if PyAudio not installed
 try:
+    recognizer = sr.Recognizer()
     mic = sr.Microphone()
-    mic_available = True
+    local_voice_enabled = True
 except Exception:
-    mic = None
-    mic_available = False
+    local_voice_enabled = False
+    st.info("⚠️ Voice recording is disabled in this environment.")
 
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("▶️ Start Recording"):
-        if not mic_available:
-            st.warning("Voice recording not available in this environment. Run locally to use microphone.")
-        else:
+if local_voice_enabled:
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("▶️ Start Recording"):
             st.info("Listening... please speak clearly.")
-            with mic as source:
-                recognizer.adjust_for_ambient_noise(source)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
             try:
+                with mic as source:
+                    recognizer.adjust_for_ambient_noise(source)
+                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
                 query_text = recognizer.recognize_google(audio)
                 st.session_state.user_question = query_text
                 st.success(f"🗣️ Recognized: {query_text}")
@@ -117,10 +116,9 @@ with col1:
                 st.error("Sorry, I couldn't understand your voice.")
             except sr.RequestError:
                 st.error("Speech recognition service error.")
-
-with col2:
-    if st.button("🛑 Stop Recording"):
-        st.info("Recording stopped.")
+    with col2:
+        if st.button("🛑 Stop Recording"):
+            st.info("Recording stopped.")
 
 # =============================
 # Question Input
@@ -170,24 +168,34 @@ if st.button("✨ Get Answer"):
         st.warning("Please upload at least one PDF first!")
     elif not user_question.strip():
         st.warning("Please enter or speak a question first!")
+    elif not embeddings_available:
+        st.error(
+            "⚠️ Embeddings or FAISS not available in this environment. "
+            "Try running the app locally with all dependencies installed."
+        )
     else:
         with st.spinner("Thinking..."):
+            # Split text into chunks
             text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = text_splitter.split_text(pdf_text)
             cleaned_chunks = [clean_for_embedding(chunk) for chunk in chunks]
 
+            # Create embeddings and FAISS vector store
             embeddings = OpenAIEmbeddings(openai_api_key=st.session_state.openai_api_key)
             vectorstore = FAISS.from_texts(cleaned_chunks, embeddings)
 
+            # Retrieve relevant chunks
             docs = vectorstore.similarity_search(user_question, k=3)
             context = "\n".join([doc.page_content for doc in docs])
 
+            # Get answer from OpenAI LLM
             llm = OpenAI(openai_api_key=st.session_state.openai_api_key, temperature=0)
             answer = llm(
                 f"Answer the question using ONLY the following context:\n{context}\n"
                 f"Question: {user_question}\nAnswer:"
             )
 
+            # Store in chat history with output type
             st.session_state.chat_history.append({
                 "user": user_question,
                 "bot": answer,
@@ -212,10 +220,10 @@ for chat in st.session_state.chat_history[::-1]:
 # =============================
 st.markdown(
     """
-    <footer style="text-align:center; margin-top:40px; font-size:14px; color:gray;">
+    <div style="text-align: center; margin-top: 50px; font-size: 14px; color: gray;">
         Made with ❤️ by Sachin Aditiya | 
-        <a href='https://www.linkedin.com/in/sachin-aditiya-b-7691b314b/' target='_blank'>Connect on LinkedIn</a>
-    </footer>
+        <a href='https://www.linkedin.com/in/sachin-aditiya-b-7691b314b/' target='_blank'>Connect with me on LinkedIn</a>
+    </div>
     """,
     unsafe_allow_html=True
 )
